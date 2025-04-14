@@ -1,0 +1,69 @@
+{
+    "points": [
+        {
+            "pointId": "0",
+            "label": "A",
+            "labelTextLocation": [
+                10.0,
+                10.0
+            ],
+            "coordinates": [
+                10.0,
+                10.0
+            ]
+        },
+        {
+            "pointId": "1",
+            "label": "B",
+            "labelTextLocation": [
+                20.0,
+                20.0
+            ],
+            "coordinates": [
+                20.0,
+                20.0
+            ]
+        }
+    ],
+    "line": [
+        {
+            "lineId": "1",
+            "startPointId": "1",
+            "endPointId": "2",
+            "valueLabel": "a",
+            "valueLabelLocation": [
+                15.0,
+                15.0
+            ]
+        }
+    ],
+    "angle": [
+        {
+            "angleId": "1",
+            "points": ["a", "b", "c"],
+            "valueLabel": "a",
+            "valueLabelLocation": [
+                10.0,
+                10.0
+            ]
+        }
+    ],
+    "collinear": [
+        {
+            "collinearId": "0",
+            "pointIds": [
+                "0",
+                "1"
+            ]
+        }
+    ],
+    "circle": [
+        {
+            "circleId": "0",
+            "centerPointId": "0",
+            "onCirclePointId": [
+                "1"
+            ]
+        }
+    ]
+}
