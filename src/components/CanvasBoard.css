@@ -53,6 +53,22 @@
 }
 
 /* 在现有样式的基础上添加 */
+.drawing-canvas {
+  cursor: default;
+}
+
+.drawing-canvas:hover {
+  cursor: crosshair;
+}
+
+.dragging-info {
+  background-color: #ff9800;
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
 .info-panel {
   display: flex;
   gap: 20px;

@@ -39,6 +39,8 @@ const CanvasBoard: React.FC = () => {
   const [nextId, setNextId] = useState(1);
   const [mousePosition, setMousePosition] = useState<{x: number, y: number} | null>(null);
   const [hoveredPointId, setHoveredPointId] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [draggedPointId, setDraggedPointId] = useState<number | null>(null);
 
   // 绘制所有图形
   useEffect(() => {
@@ -71,7 +73,7 @@ const CanvasBoard: React.FC = () => {
       drawCircle(ctx, circle);
     });
 
-    // 绘制临时连接线
+    // 绘制临时连接线 - 线段工具
     if (tool === 'line' && tempPoints.length === 1 && mousePosition) {
       ctx.beginPath();
       ctx.moveTo(tempPoints[0].x, tempPoints[0].y);
@@ -83,7 +85,108 @@ const CanvasBoard: React.FC = () => {
       ctx.setLineDash([]); // 重置为实线
       ctx.closePath();
     }
-  }, [points, lines, angles, circles, tempPoints, mousePosition, hoveredPointId]);
+    
+    // 绘制角度工具的临时可视化
+    if (tool === 'angle' && tempPoints.length > 0 && mousePosition) {
+      if (tempPoints.length === 1) {
+        // 绘制第一条临时线
+        ctx.beginPath();
+        ctx.moveTo(tempPoints[0].x, tempPoints[0].y);
+        ctx.lineTo(mousePosition.x, mousePosition.y);
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.closePath();
+      } else if (tempPoints.length === 2) {
+        // 绘制两条临时线和角度
+        const point1 = tempPoints[0];
+        const vertex = tempPoints[1];
+        
+        // 第一条线 (固定)
+        ctx.beginPath();
+        ctx.moveTo(vertex.x, vertex.y);
+        ctx.lineTo(point1.x, point1.y);
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.closePath();
+        
+        // 第二条线 (临时)
+        ctx.beginPath();
+        ctx.moveTo(vertex.x, vertex.y);
+        ctx.lineTo(mousePosition.x, mousePosition.y);
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.closePath();
+        
+        // 计算临时角度
+        const angle1 = Math.atan2(point1.y - vertex.y, point1.x - vertex.x);
+        const angle2 = Math.atan2(mousePosition.y - vertex.y, mousePosition.x - vertex.x);
+        let angleDiff = Math.abs(angle1 - angle2) * (180 / Math.PI);
+        if (angleDiff > 180) angleDiff = 360 - angleDiff;
+        
+        // 绘制临时角度弧
+        const radius = 20;
+        ctx.beginPath();
+        ctx.arc(vertex.x, vertex.y, radius, Math.min(angle1, angle2), Math.max(angle1, angle2));
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 2]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.closePath();
+        
+        // 显示临时角度值
+        const midAngle = (angle1 + angle2) / 2;
+        const textX = vertex.x + (radius + 10) * Math.cos(midAngle);
+        const textY = vertex.y + (radius + 10) * Math.sin(midAngle);
+        ctx.font = '12px Arial';
+        ctx.fillStyle = '#000';
+        ctx.fillText(`${angleDiff.toFixed(1)}°`, textX, textY);
+      }
+    }
+    
+    // 绘制圆工具的临时可视化
+    if (tool === 'circle' && tempPoints.length === 1 && mousePosition) {
+      const center = tempPoints[0];
+      const radius = Math.sqrt(
+        Math.pow(mousePosition.x - center.x, 2) + Math.pow(mousePosition.y - center.y, 2)
+      );
+      
+      // 绘制临时圆
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#9b59b6';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.closePath();
+      
+      // 绘制半径线
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(mousePosition.x, mousePosition.y);
+      ctx.strokeStyle = '#9b59b6';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.closePath();
+      
+      // 显示半径值
+      const midX = (center.x + mousePosition.x) / 2;
+      const midY = (center.y + mousePosition.y) / 2;
+      ctx.font = '12px Arial';
+      ctx.fillStyle = '#000';
+      ctx.fillText(`r = ${radius.toFixed(1)}`, midX, midY - 5);
+    }
+  }, [points, lines, angles, circles, tempPoints, mousePosition, hoveredPointId, tool]);
 
   // 绘制点
   const drawPoint = (ctx: CanvasRenderingContext2D, point: Point, isHovered: boolean = false) => {
@@ -186,19 +289,92 @@ const CanvasBoard: React.FC = () => {
     
     setMousePosition({ x, y });
     
+    // 如果正在拖拽点
+    if (isDragging && draggedPointId !== null) {
+      // 更新点的位置
+      setPoints(prevPoints => 
+        prevPoints.map(point => 
+          point.id === draggedPointId 
+            ? { ...point, x, y } 
+            : point
+        )
+      );
+      
+      // 更新使用该点的线段
+      setLines(prevLines => 
+        prevLines.map(line => {
+          if (line.start.id === draggedPointId) {
+            return { ...line, start: { ...line.start, x, y } };
+          } else if (line.end.id === draggedPointId) {
+            return { ...line, end: { ...line.end, x, y } };
+          }
+          return line;
+        })
+      );
+      
+      // 更新使用该点的角度
+      setAngles(prevAngles => 
+        prevAngles.map(angle => {
+          if (angle.point1.id === draggedPointId) {
+            return { ...angle, point1: { ...angle.point1, x, y } };
+          } else if (angle.vertex.id === draggedPointId) {
+            return { ...angle, vertex: { ...angle.vertex, x, y } };
+          } else if (angle.point2.id === draggedPointId) {
+            return { ...angle, point2: { ...angle.point2, x, y } };
+          }
+          return angle;
+        })
+      );
+      
+      // 更新使用该点的圆
+      setCircles(prevCircles => 
+        prevCircles.map(circle => {
+          if (circle.center.id === draggedPointId) {
+            return { ...circle, center: { ...circle.center, x, y } };
+          }
+          return circle;
+        })
+      );
+      
+      return;
+    }
+    
     // 检查鼠标是否悬停在点上
     const hoveredPoint = findExistingPoint(x, y);
     setHoveredPointId(hoveredPoint ? hoveredPoint.id : null);
+  };
+
+  // 处理鼠标按下事件
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (hoveredPointId !== null) {
+      setIsDragging(true);
+      setDraggedPointId(hoveredPointId);
+    }
+  };
+
+  // 处理鼠标释放事件
+  const handleMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDraggedPointId(null);
+    }
   };
 
   // 处理鼠标离开画布
   const handleMouseLeave = () => {
     setMousePosition(null);
     setHoveredPointId(null);
+    if (isDragging) {
+      setIsDragging(false);
+      setDraggedPointId(null);
+    }
   };
 
   // 处理画布点击事件
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // 如果正在拖拽，不处理点击事件
+    if (isDragging) return;
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -216,10 +392,14 @@ const CanvasBoard: React.FC = () => {
     } else {
       // 创建新点
       clickedPoint = { x, y, id: nextId };
+      // 只有在点工具或者需要创建新点的情况下才添加到点集合中
       if (tool === 'point') {
         setPoints(prevPoints => [...prevPoints, clickedPoint]);
+        setNextId(prevId => prevId + 1);
+      } else {
+        // 对于其他工具，只有在实际使用这个点时才添加到点集合
+        setNextId(prevId => prevId + 1);
       }
-      setNextId(prevId => prevId + 1);
     }
 
     switch (tool) {
@@ -231,6 +411,10 @@ const CanvasBoard: React.FC = () => {
       case 'line':
         setTempPoints(prevTempPoints => {
           if (prevTempPoints.length === 0) {
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
             return [clickedPoint];
           } else {
             const startPoint = prevTempPoints[0];
@@ -238,6 +422,12 @@ const CanvasBoard: React.FC = () => {
             if (startPoint.id === clickedPoint.id) {
               return prevTempPoints;
             }
+            
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
+            
             const newLine = {
               start: startPoint,
               end: clickedPoint,
@@ -252,12 +442,22 @@ const CanvasBoard: React.FC = () => {
       case 'angle':
         setTempPoints(prevTempPoints => {
           if (prevTempPoints.length === 0) {
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
             return [clickedPoint];
           } else if (prevTempPoints.length === 1) {
             // 避免选择同一个点
             if (prevTempPoints[0].id === clickedPoint.id) {
               return prevTempPoints;
             }
+            
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
+            
             return [...prevTempPoints, clickedPoint];
           } else {
             const point1 = prevTempPoints[0];
@@ -266,6 +466,12 @@ const CanvasBoard: React.FC = () => {
             if (vertex.id === clickedPoint.id || point1.id === clickedPoint.id) {
               return prevTempPoints;
             }
+            
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
+            
             const newAngle = {
               point1,
               vertex,
@@ -281,9 +487,19 @@ const CanvasBoard: React.FC = () => {
       case 'circle':
         setTempPoints(prevTempPoints => {
           if (prevTempPoints.length === 0) {
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
             return [clickedPoint];
           } else {
             const center = prevTempPoints[0];
+            
+            // 如果是新创建的点，添加到点集合
+            if (!existingPoint) {
+              setPoints(prevPoints => [...prevPoints, clickedPoint]);
+            }
+            
             const radius = Math.sqrt(
               Math.pow(clickedPoint.x - center.x, 2) + Math.pow(clickedPoint.y - center.y, 2)
             );
@@ -369,6 +585,8 @@ const CanvasBoard: React.FC = () => {
         className="drawing-canvas"
         onClick={handleCanvasClick}
         onMouseMove={handleMouseMove}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       />
       <div className="info-panel">
@@ -376,6 +594,7 @@ const CanvasBoard: React.FC = () => {
         <div>线段: {lines.length}</div>
         <div>角度: {angles.length}</div>
         <div>圆: {circles.length}</div>
+        {isDragging && <div className="dragging-info">正在移动点 {draggedPointId}</div>}
       </div>
     </div>
   );
