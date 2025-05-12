@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, MouseEvent } from 'react';
+import React, { useState, useRef, useEffect, MouseEvent, useCallback } from 'react';
 import './CanvasBoard.css';
 
 type Point = {
@@ -11,6 +11,7 @@ type Line = {
   start: Point;
   end: Point;
   id: number;
+  animated?: boolean;
 };
 
 type Angle = {
@@ -41,6 +42,34 @@ const CanvasBoard: React.FC = () => {
   const [hoveredPointId, setHoveredPointId] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [draggedPointId, setDraggedPointId] = useState<number | null>(null);
+  
+  // 添加动画相关状态
+  const [animationActive, setAnimationActive] = useState(false);
+  const [animationOffset, setAnimationOffset] = useState(0);
+  const animationFrameRef = useRef<number | null>(null);
+  const [selectedLineId, setSelectedLineId] = useState<number | null>(null);
+
+  // 动画循环函数
+  const animationLoop = useCallback(() => {
+    setAnimationOffset(prev => (prev + 2) % 16); // 控制动画速度和模式
+    animationFrameRef.current = requestAnimationFrame(animationLoop);
+  }, []);
+
+  // 启动/停止动画
+  useEffect(() => {
+    if (animationActive) {
+      animationFrameRef.current = requestAnimationFrame(animationLoop);
+    } else if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [animationActive, animationLoop]);
 
   // 绘制所有图形
   useEffect(() => {
@@ -60,7 +89,7 @@ const CanvasBoard: React.FC = () => {
 
     // 绘制所有线
     lines.forEach(line => {
-      drawLine(ctx, line);
+      drawLine(ctx, line, line.id === selectedLineId, animationOffset);
     });
 
     // 绘制所有角度
@@ -186,7 +215,7 @@ const CanvasBoard: React.FC = () => {
       ctx.fillStyle = '#000';
       ctx.fillText(`r = ${radius.toFixed(1)}`, midX, midY - 5);
     }
-  }, [points, lines, angles, circles, tempPoints, mousePosition, hoveredPointId, tool]);
+  }, [points, lines, angles, circles, tempPoints, mousePosition, hoveredPointId, tool, animationOffset, selectedLineId]);
 
   // 绘制点
   const drawPoint = (ctx: CanvasRenderingContext2D, point: Point, isHovered: boolean = false) => {
@@ -196,20 +225,153 @@ const CanvasBoard: React.FC = () => {
     ctx.fill();
     ctx.closePath();
     
+    // 计算标签的最佳位置
+    const labelPosition = calculateBestLabelPosition(point);
+    
     // 绘制点的ID
     ctx.font = '10px Arial';
     ctx.fillStyle = '#000';
-    ctx.fillText(`${point.id}`, point.x + 8, point.y - 8);
+    ctx.fillText(`${point.id}`, labelPosition.x, labelPosition.y);
+  };
+  
+  // 计算标签的最佳位置
+  const calculateBestLabelPosition = (point: Point) => {
+    // 定义8个可能的方向位置
+    const positions = [
+      { x: point.x + 8, y: point.y - 8 },    // 右上
+      { x: point.x + 8, y: point.y + 15 },   // 右下
+      { x: point.x - 15, y: point.y - 8 },   // 左上
+      { x: point.x - 15, y: point.y + 15 },  // 左下
+      { x: point.x + 15, y: point.y + 3 },   // 右
+      { x: point.x - 15, y: point.y + 3 },   // 左
+      { x: point.x, y: point.y - 15 },       // 上
+      { x: point.x, y: point.y + 20 }        // 下
+    ];
+    
+    // 计算每个位置的拥挤度分数
+    const scores = positions.map(pos => {
+      let score = 0;
+      
+      // 检查与其他点的距离
+      points.forEach(p => {
+        if (p.id !== point.id) {
+          const distance = Math.sqrt(
+            Math.pow(pos.x - p.x, 2) + Math.pow(pos.y - p.y, 2)
+          );
+          if (distance < 20) {
+            score += (20 - distance);
+          }
+        }
+      });
+      
+      // 检查与线段的距离
+      lines.forEach(line => {
+        const distance = pointToLineDistance(
+          pos.x, pos.y,
+          line.start.x, line.start.y,
+          line.end.x, line.end.y
+        );
+        if (distance < 15) {
+          score += (15 - distance);
+        }
+      });
+      
+      // 检查与角度标签的距离
+      angles.forEach(angle => {
+        const angle1 = Math.atan2(angle.point1.y - angle.vertex.y, angle.point1.x - angle.vertex.x);
+        const angle2 = Math.atan2(angle.point2.y - angle.vertex.y, angle.point2.x - angle.vertex.x);
+        const midAngle = (angle1 + angle2) / 2;
+        const radius = 30;
+        const labelX = angle.vertex.x + radius * Math.cos(midAngle);
+        const labelY = angle.vertex.y + radius * Math.sin(midAngle);
+        
+        const distance = Math.sqrt(
+          Math.pow(pos.x - labelX, 2) + Math.pow(pos.y - labelY, 2)
+        );
+        if (distance < 20) {
+          score += (20 - distance);
+        }
+      });
+      
+      // 检查与圆的距离
+      circles.forEach(circle => {
+        // 检查与圆心的距离
+        const distanceToCenter = Math.sqrt(
+          Math.pow(pos.x - circle.center.x, 2) + Math.pow(pos.y - circle.center.y, 2)
+        );
+        
+        // 检查与圆周的距离
+        const distanceToCircumference = Math.abs(
+          distanceToCenter - circle.radius
+        );
+        
+        if (distanceToCenter < 20) {
+          score += (20 - distanceToCenter);
+        }
+        
+        if (distanceToCircumference < 10) {
+          score += (10 - distanceToCircumference);
+        }
+      });
+      
+      // 避免标签超出画布边界
+      const canvas = canvasRef.current;
+      if (canvas) {
+        if (pos.x < 15) score += 30;
+        if (pos.y < 15) score += 30;
+        if (pos.x > canvas.width - 15) score += 30;
+        if (pos.y > canvas.height - 15) score += 30;
+      }
+      
+      return score;
+    });
+    
+    // 选择拥挤度最低的位置
+    let minScore = Infinity;
+    let bestIndex = 0;
+    
+    scores.forEach((score, index) => {
+      if (score < minScore) {
+        minScore = score;
+        bestIndex = index;
+      }
+    });
+    
+    return positions[bestIndex];
   };
 
-  // 绘制线
-  const drawLine = (ctx: CanvasRenderingContext2D, line: Line) => {
+  // 绘制线 - 修改以支持动画
+  const drawLine = (ctx: CanvasRenderingContext2D, line: Line, isAnimated: boolean = false, animOffset: number = 0) => {
     ctx.beginPath();
     ctx.moveTo(line.start.x, line.start.y);
     ctx.lineTo(line.end.x, line.end.y);
-    ctx.strokeStyle = '#2ecc71';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    
+    if (isAnimated && animationActive) {
+      // 创建流水动画效果
+      ctx.strokeStyle = '#2ecc71';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 8]); // 设置虚线样式
+      ctx.lineDashOffset = -animOffset; // 使用动画偏移量
+      ctx.stroke();
+      
+      // 添加第二层动画效果
+      ctx.beginPath();
+      ctx.moveTo(line.start.x, line.start.y);
+      ctx.lineTo(line.end.x, line.end.y);
+      ctx.strokeStyle = '#3498db';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 12]);
+      ctx.lineDashOffset = -animOffset * 1.5; // 不同的偏移速度
+      ctx.stroke();
+      
+      // 重置虚线设置
+      ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = '#2ecc71';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    
     ctx.closePath();
   };
 
@@ -370,6 +532,75 @@ const CanvasBoard: React.FC = () => {
     }
   };
 
+  // 切换线段动画状态
+  const toggleLineAnimation = (lineId: number) => {
+    if (selectedLineId === lineId) {
+      setSelectedLineId(null);
+      setAnimationActive(false);
+    } else {
+      setSelectedLineId(lineId);
+      setAnimationActive(true);
+    }
+  };
+
+  // 查找点击位置附近的线段
+  const findLineNearPoint = (x: number, y: number): Line | null => {
+    const threshold = 10; // 点击容差
+    
+    for (const line of lines) {
+      // 计算点到线段的距离
+      const distance = pointToLineDistance(
+        x, y,
+        line.start.x, line.start.y,
+        line.end.x, line.end.y
+      );
+      
+      if (distance <= threshold) {
+        return line;
+      }
+    }
+    
+    return null;
+  };
+
+  // 计算点到线段的距离
+  const pointToLineDistance = (
+    x: number, y: number,
+    x1: number, y1: number,
+    x2: number, y2: number
+  ): number => {
+    const A = x - x1;
+    const B = y - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+    
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    
+    if (lenSq !== 0) {
+      param = dot / lenSq;
+    }
+    
+    let xx, yy;
+    
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+    
+    const dx = x - xx;
+    const dy = y - yy;
+    
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
   // 处理画布点击事件
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // 如果正在拖拽，不处理点击事件
@@ -381,6 +612,15 @@ const CanvasBoard: React.FC = () => {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    
+    // 在点工具模式下检查是否点击了线段
+    if (tool === 'point') {
+      const clickedLine = findLineNearPoint(x, y);
+      if (clickedLine) {
+        toggleLineAnimation(clickedLine.id);
+        return;
+      }
+    }
     
     // 检查是否点击了已有的点
     const existingPoint = findExistingPoint(x, y);
@@ -563,7 +803,9 @@ const CanvasBoard: React.FC = () => {
         <button className="clear-btn" onClick={handleClear}>清空</button>
       </div>
       <div className="status-bar">
-        {tool === 'point' && '点击画布添加点，或点击已有的点选择它'}
+        {tool === 'point' && (selectedLineId 
+          ? '点击线段可以切换动画效果，点击其他区域取消选择' 
+          : '点击画布添加点，或点击已有的点选择它，点击线段可以激活动画')}
         {tool === 'line' && (tempPoints.length === 0 
           ? '点击已有点或创建新点作为起点' 
           : `从点 ${tempPoints[0].id} 开始，点击已有点或创建新点作为终点`)}
@@ -595,6 +837,17 @@ const CanvasBoard: React.FC = () => {
         <div>角度: {angles.length}</div>
         <div>圆: {circles.length}</div>
         {isDragging && <div className="dragging-info">正在移动点 {draggedPointId}</div>}
+        {selectedLineId !== null && (
+          <div className="animation-info">
+            线段 {selectedLineId} 动画已激活
+            <button 
+              className="animation-toggle-btn" 
+              onClick={() => setAnimationActive(!animationActive)}
+            >
+              {animationActive ? '暂停' : '播放'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
