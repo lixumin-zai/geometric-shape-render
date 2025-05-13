@@ -321,4 +321,4 @@ const CanvasBoard: React.FC = () => {
   );
 };
 
-export default CanvasBoard;
+// export default CanvasBoard;
